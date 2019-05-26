@@ -20,7 +20,6 @@ package org.bitcoinj.core;
 import com.google.common.annotations.*;
 import com.google.common.base.*;
 import com.google.common.collect.*;
-import com.google.common.primitives.*;
 import com.google.common.util.concurrent.*;
 import net.jcip.annotations.*;
 import org.bitcoinj.core.listeners.*;
@@ -161,7 +160,7 @@ public class PeerGroup implements TransactionBroadcaster {
     private final PeerListener peerListener = new PeerListener();
 
     private int minBroadcastConnections = 0;
-    private final ScriptsChangeEventListener walletScriptEventListener = new ScriptsChangeEventListener() {
+    private final ScriptsChangeEventListener walletScriptsEventListener = new ScriptsChangeEventListener() {
         @Override public void onScriptsChanged(Wallet wallet, List<Script> scripts, boolean isAddingScripts) {
             recalculateFastCatchupAndFilter(FilterRecalculateMode.SEND_IF_CHANGED);
         }
@@ -346,7 +345,7 @@ public class PeerGroup implements TransactionBroadcaster {
                 int result = backoffMap.get(a).compareTo(backoffMap.get(b));
                 // Sort by port if otherwise equals - for testing
                 if (result == 0)
-                    result = Ints.compare(a.getPort(), b.getPort());
+                    result = Integer.compare(a.getPort(), b.getPort());
                 return result;
             }
         });
@@ -460,15 +459,9 @@ public class PeerGroup implements TransactionBroadcaster {
             // Don't hold the lock across discovery as this process can be very slow.
             boolean discoverySuccess = false;
             if (doDiscovery) {
-                try {
-                    discoverySuccess = discoverPeers() > 0;
-                } catch (PeerDiscoveryException e) {
-                    log.error("Peer discovery failure", e);
-                }
+                discoverySuccess = discoverPeers() > 0;
             }
 
-            long retryTime;
-            PeerAddress addrToTry;
             lock.lock();
             try {
                 if (doDiscovery) {
@@ -492,16 +485,21 @@ public class PeerGroup implements TransactionBroadcaster {
                         // were given a fixed set of addresses in some test scenario.
                     }
                     return;
-                } else {
-                    do {
-                        addrToTry = inactives.poll();
-                    } while (ipv6Unreachable && addrToTry.getAddr() instanceof Inet6Address);
-                    retryTime = backoffMap.get(addrToTry).getRetryTime();
                 }
+                PeerAddress addrToTry;
+                do {
+                    addrToTry = inactives.poll();
+                } while (ipv6Unreachable && addrToTry.getAddr() instanceof Inet6Address);
+                if (addrToTry == null) {
+                    // We have exhausted the queue of reachable peers, so just settle down.
+                    // Most likely we were given a fixed set of addresses in some test scenario.
+                    return;
+                }
+                long retryTime = backoffMap.get(addrToTry).getRetryTime();
                 retryTime = Math.max(retryTime, groupBackoff.getRetryTime());
                 if (retryTime > now) {
                     long delay = retryTime - now;
-                    log.info("Waiting {} ms before next connect attempt {}", delay, addrToTry == null ? "" : "to " + addrToTry);
+                    log.info("Waiting {} ms before next connect attempt to {}", delay, addrToTry);
                     inactives.add(addrToTry);
                     executor.schedule(this, delay, TimeUnit.MILLISECONDS);
                     return;
@@ -860,22 +858,26 @@ public class PeerGroup implements TransactionBroadcaster {
         int newMax;
         lock.lock();
         try {
-            addInactive(peerAddress);
-            newMax = getMaxConnections() + 1;
+            if (addInactive(peerAddress)) {
+                newMax = getMaxConnections() + 1;
+                setMaxConnections(newMax);
+            }
         } finally {
             lock.unlock();
         }
-        setMaxConnections(newMax);
     }
 
-    private void addInactive(PeerAddress peerAddress) {
+    // Adds peerAddress to backoffMap map and inactives queue.
+    // Returns true if it was added, false if it was already there.
+    private boolean addInactive(PeerAddress peerAddress) {
         lock.lock();
         try {
             // Deduplicate
             if (backoffMap.containsKey(peerAddress))
-                return;
+                return false;
             backoffMap.put(peerAddress, new ExponentialBackoff(peerBackoffParams));
             inactives.offer(peerAddress);
+            return true;
         } finally {
             lock.unlock();
         }
@@ -918,7 +920,7 @@ public class PeerGroup implements TransactionBroadcaster {
     }
 
     /** Returns number of discovered peers. */
-    protected int discoverPeers() throws PeerDiscoveryException {
+    protected int discoverPeers() {
         // Don't hold the lock whilst doing peer discovery: it can take a long time and cause high API latency.
         checkState(!lock.isHeldByCurrentThread());
         int maxPeersToDiscoverCount = this.vMaxPeersToDiscoverCount;
@@ -927,7 +929,12 @@ public class PeerGroup implements TransactionBroadcaster {
         final List<PeerAddress> addressList = Lists.newLinkedList();
         for (PeerDiscovery peerDiscovery : peerDiscoverers /* COW */) {
             InetSocketAddress[] addresses;
-            addresses = peerDiscovery.getPeers(requiredServices, peerDiscoveryTimeoutMillis, TimeUnit.MILLISECONDS);
+            try {
+                addresses = peerDiscovery.getPeers(requiredServices, peerDiscoveryTimeoutMillis, TimeUnit.MILLISECONDS);
+            } catch (PeerDiscoveryException e) {
+                log.warn(e.getMessage());
+                continue;
+            }
             for (InetSocketAddress address : addresses) addressList.add(new PeerAddress(params, address));
             if (addressList.size() >= maxPeersToDiscoverCount) break;
         }
@@ -1100,7 +1107,7 @@ public class PeerGroup implements TransactionBroadcaster {
             wallet.setTransactionBroadcaster(this);
             wallet.addCoinsReceivedEventListener(Threading.SAME_THREAD, walletCoinsReceivedEventListener);
             wallet.addKeyChainEventListener(Threading.SAME_THREAD, walletKeyEventListener);
-            wallet.addScriptChangeEventListener(Threading.SAME_THREAD, walletScriptEventListener);
+            wallet.addScriptsChangeEventListener(Threading.SAME_THREAD, walletScriptsEventListener);
             addPeerFilterProvider(wallet);
             for (Peer peer : peers) {
                 peer.addWallet(wallet);
@@ -1172,7 +1179,7 @@ public class PeerGroup implements TransactionBroadcaster {
         peerFilterProviders.remove(wallet);
         wallet.removeCoinsReceivedEventListener(walletCoinsReceivedEventListener);
         wallet.removeKeyChainEventListener(walletKeyEventListener);
-        wallet.removeScriptChangeEventListener(walletScriptEventListener);
+        wallet.removeScriptsChangeEventListener(walletScriptsEventListener);
         wallet.setTransactionBroadcaster(null);
         for (Peer peer : peers) {
             peer.removeWallet(wallet);

@@ -30,6 +30,7 @@ import org.bitcoinj.crypto.*;
 import org.bitcoinj.script.*;
 import org.bitcoinj.script.Script.ScriptType;
 import org.bitcoinj.utils.*;
+import org.bitcoinj.wallet.listeners.CurrentKeyChangeEventListener;
 import org.bitcoinj.wallet.listeners.KeyChainEventListener;
 import org.slf4j.*;
 import org.bouncycastle.crypto.params.*;
@@ -194,6 +195,8 @@ public class KeyChainGroup implements KeyBag {
     private int lookaheadSize = -1;
     private int lookaheadThreshold = -1;
 
+    private final CopyOnWriteArrayList<ListenerRegistration<CurrentKeyChangeEventListener>> currentKeyChangeListeners = new CopyOnWriteArrayList<>();
+
     /** Creates a keychain group with just a basic chain. No deterministic chains will be created automatically. */
     public static KeyChainGroup createBasic(NetworkParameters params) {
         return new KeyChainGroup(params, new BasicKeyChain(), null, -1, -1, null, null);
@@ -274,6 +277,7 @@ public class KeyChainGroup implements KeyBag {
         chains.add(chain);
         currentKeys.clear();
         currentAddresses.clear();
+        queueOnCurrentKeyChanged();
     }
 
     /**
@@ -502,12 +506,14 @@ public class KeyChainGroup implements KeyBag {
     @Override
     @Nullable
     public RedeemData findRedeemDataFromScriptHash(byte[] scriptHash) {
-        // Iterate in reverse order, since the active keychain is the one most likely to have the hit
-        for (Iterator<DeterministicKeyChain> iter = chains.descendingIterator() ; iter.hasNext() ; ) {
-            DeterministicKeyChain chain = iter.next();
-            RedeemData redeemData = chain.findRedeemDataByScriptHash(ByteString.copyFrom(scriptHash));
-            if (redeemData != null)
-                return redeemData;
+        if (chains != null) {
+            // Iterate in reverse order, since the active keychain is the one most likely to have the hit
+            for (Iterator<DeterministicKeyChain> iter = chains.descendingIterator(); iter.hasNext();) {
+                DeterministicKeyChain chain = iter.next();
+                RedeemData redeemData = chain.findRedeemDataByScriptHash(ByteString.copyFrom(scriptHash));
+                if (redeemData != null)
+                    return redeemData;
+            }
         }
         return null;
     }
@@ -569,6 +575,7 @@ public class KeyChainGroup implements KeyBag {
             if (entry.getValue() != null && entry.getValue().equals(address)) {
                 log.info("Marking P2SH address as used: {}", address);
                 currentAddresses.put(entry.getKey(), freshAddress(entry.getKey()));
+                queueOnCurrentKeyChanged();
                 return;
             }
         }
@@ -582,6 +589,7 @@ public class KeyChainGroup implements KeyBag {
             if (entry.getValue() != null && entry.getValue().equals(key)) {
                 log.info("Marking key as used: {}", key);
                 currentKeys.put(entry.getKey(), freshKey(entry.getKey()));
+                queueOnCurrentKeyChanged();
                 return;
             }
         }
@@ -665,17 +673,22 @@ public class KeyChainGroup implements KeyBag {
     public void encrypt(KeyCrypter keyCrypter, KeyParameter aesKey) {
         checkNotNull(keyCrypter);
         checkNotNull(aesKey);
-        checkState(chains == null || !chains.isEmpty() || basic.numKeys() != 0, "can't encrypt entirely empty wallet");
-        // This code must be exception safe.
+        checkState((chains != null && !chains.isEmpty()) || basic.numKeys() != 0, "can't encrypt entirely empty wallet");
+
         BasicKeyChain newBasic = basic.toEncrypted(keyCrypter, aesKey);
         List<DeterministicKeyChain> newChains = new ArrayList<>();
-        if (chains != null)
+        if (chains != null) {
             for (DeterministicKeyChain chain : chains)
                 newChains.add(chain.toEncrypted(keyCrypter, aesKey));
+        }
+
+        // Code below this point must be exception safe.
         this.keyCrypter = keyCrypter;
-        basic = newBasic;
-        this.chains.clear();
-        this.chains.addAll(newChains);
+        this.basic = newBasic;
+        if (chains != null) {
+            this.chains.clear();
+            this.chains.addAll(newChains);
+        }
     }
 
     /**
@@ -685,18 +698,20 @@ public class KeyChainGroup implements KeyBag {
      * @throws org.bitcoinj.crypto.KeyCrypterException Thrown if the wallet decryption fails for some reason, leaving the group unchanged.
      */
     public void decrypt(KeyParameter aesKey) {
-        // This code must be exception safe.
         checkNotNull(aesKey);
+
         BasicKeyChain newBasic = basic.toDecrypted(aesKey);
-        List<DeterministicKeyChain> newChains = new ArrayList<>(chains.size());
-        if (chains != null)
+        if (chains != null) {
+            List<DeterministicKeyChain> newChains = new ArrayList<>(chains.size());
             for (DeterministicKeyChain chain : chains)
                 newChains.add(chain.toDecrypted(aesKey));
 
+            // Code below this point must be exception safe.
+            this.chains.clear();
+            this.chains.addAll(newChains);
+        }
+        this.basic = newBasic;
         this.keyCrypter = null;
-        basic = newBasic;
-        chains.clear();
-        chains.addAll(newChains);
     }
 
     /** Returns true if the group is encrypted. */
@@ -794,6 +809,37 @@ public class KeyChainGroup implements KeyBag {
             for (DeterministicKeyChain chain : chains)
                 chain.removeEventListener(listener);
         return basic.removeEventListener(listener);
+    }
+
+    /** Removes a listener for events that are run when a current key and/or address changes. */
+    public void addCurrentKeyChangeEventListener(CurrentKeyChangeEventListener listener) {
+        addCurrentKeyChangeEventListener(listener, Threading.USER_THREAD);
+    }
+
+    /**
+     * Adds a listener for events that are run when a current key and/or address changes, on the given
+     * executor.
+     */
+    public void addCurrentKeyChangeEventListener(CurrentKeyChangeEventListener listener, Executor executor) {
+        checkNotNull(listener);
+        currentKeyChangeListeners.add(new ListenerRegistration<>(listener, executor));
+    }
+
+    /** Removes a listener for events that are run when a current key and/or address changes. */
+    public boolean removeCurrentKeyChangeEventListener(CurrentKeyChangeEventListener listener) {
+        checkNotNull(listener);
+        return ListenerRegistration.removeFromList(listener, currentKeyChangeListeners);
+    }
+
+    private void queueOnCurrentKeyChanged() {
+        for (final ListenerRegistration<CurrentKeyChangeEventListener> registration : currentKeyChangeListeners) {
+            registration.executor.execute(new Runnable() {
+                @Override
+                public void run() {
+                    registration.listener.onCurrentKeyChanged();
+                }
+            });
+        }
     }
 
     /** Returns a list of key protobufs obtained by merging the chains. */

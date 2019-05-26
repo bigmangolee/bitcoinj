@@ -628,6 +628,11 @@ public class DeterministicKeyChain implements EncryptableKeyChain {
         return hierarchy.get(path, false, create);
     }
 
+    @Nullable
+    public DeterministicKey getRootKey() {
+        return rootKey;
+    }
+
     /**
      * <p>An alias for {@code getKeyByPath(getAccountPath())}.</p>
      *
@@ -883,16 +888,16 @@ public class DeterministicKeyChain implements EncryptableKeyChain {
                     if (seed == null && key.hasSecretBytes()) {
                         DeterministicKey accountKey = new DeterministicKey(immutablePath, chainCode, pubkey, new BigInteger(1, key.getSecretBytes().toByteArray()), null);
                         accountKey.setCreationTimeSeconds(key.getCreationTimestamp() / 1000);
-                        chain = factory.makeSpendingKeyChain(key, iter.peek(), accountKey, isMarried, outputScriptType);
+                        chain = factory.makeSpendingKeyChain(accountKey, isMarried, outputScriptType);
                         isSpendingKey = true;
                     } else if (seed == null) {
                         DeterministicKey accountKey = new DeterministicKey(immutablePath, chainCode, pubkey, null, null);
                         accountKey.setCreationTimeSeconds(key.getCreationTimestamp() / 1000);
-                        chain = factory.makeWatchingKeyChain(key, iter.peek(), accountKey, isFollowingKey, isMarried,
+                        chain = factory.makeWatchingKeyChain(accountKey, isFollowingKey, isMarried,
                                 outputScriptType);
                         isWatchingAccountKey = true;
                     } else {
-                        chain = factory.makeKeyChain(key, iter.peek(), seed, crypter, isMarried,
+                        chain = factory.makeKeyChain(seed, crypter, isMarried,
                                 outputScriptType, ImmutableList.<ChildNumber> builder().addAll(accountPath).build());
                         chain.lookaheadSize = LAZY_CALCULATE_LOOKAHEAD;
                         // If the seed is encrypted, then the chain is incomplete at this point. However, we will load
@@ -1014,7 +1019,7 @@ public class DeterministicKeyChain implements EncryptableKeyChain {
         DeterministicKeyChain chain = makeKeyChainFromSeed(decSeed, getAccountPath(), outputScriptType);
         // Now double check that the keys match to catch the case where the key is wrong but padding didn't catch it.
         if (!chain.getWatchingKey().getPubKeyPoint().equals(getWatchingKey().getPubKeyPoint()))
-            throw new KeyCrypterException("Provided AES key is wrong");
+            throw new KeyCrypterException.PublicPrivateMismatch("Provided AES key is wrong");
         chain.lookaheadSize = lookaheadSize;
         // Now copy the (pubkey only) leaf keys across to avoid rederiving them. The private key bytes are missing
         // anyway so there's nothing to decrypt.
@@ -1404,7 +1409,7 @@ public class DeterministicKeyChain implements EncryptableKeyChain {
             NetworkParameters params, StringBuilder builder) {
         for (DeterministicKey key : getKeys(includeLookahead, true)) {
             String comment = null;
-            if (key.equals(rootKey))
+            if (key.equals(getRootKey()))
                 comment = "root";
             else if (key.equals(getWatchingKey()))
                 comment = "account";

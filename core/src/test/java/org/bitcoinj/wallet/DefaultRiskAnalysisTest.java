@@ -43,17 +43,9 @@ public class DefaultRiskAnalysisTest {
 
     @Before
     public void setup() {
-        wallet = new Wallet(new Context(MAINNET)) {
-            @Override
-            public int getLastBlockSeenHeight() {
-                return 1000;
-            }
-
-            @Override
-            public long getLastBlockSeenTimeSecs() {
-                return TIMESTAMP;
-            }
-        };
+        wallet = new Wallet(new Context(MAINNET));
+        wallet.setLastBlockSeenHeight(1000);
+        wallet.setLastBlockSeenTimeSecs(TIMESTAMP);
     }
 
     @Test(expected = IllegalStateException.class)
@@ -139,7 +131,8 @@ public class DefaultRiskAnalysisTest {
 
         Transaction edgeCaseTx = new Transaction(MAINNET);
         edgeCaseTx.addInput(MAINNET.getGenesisBlock().getTransactions().get(0).getOutput(0));
-        edgeCaseTx.addOutput(DefaultRiskAnalysis.MIN_ANALYSIS_NONDUST_OUTPUT, key1); // Dust threshold
+        Coin dustThreshold = new TransactionOutput(MAINNET, null, Coin.COIN, key1).getMinNonDustValue();
+        edgeCaseTx.addOutput(dustThreshold, key1);
         assertEquals(RiskAnalysis.Result.OK, DefaultRiskAnalysis.FACTORY.create(wallet, edgeCaseTx, NO_DEPS).analyze());
     }
 

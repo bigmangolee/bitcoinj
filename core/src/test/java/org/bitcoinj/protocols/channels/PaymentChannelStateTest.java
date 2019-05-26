@@ -102,7 +102,7 @@ public class PaymentChannelStateTest extends TestWithWallet {
         }));
         sendMoneyToWallet(AbstractBlockChain.NewBlockType.BEST_CHAIN, COIN);
         chain = new BlockChain(UNITTEST, wallet, blockStore); // Recreate chain as sendMoneyToWallet will confuse it
-        serverWallet = new Wallet(UNITTEST);
+        serverWallet = Wallet.createDeterministic(UNITTEST, Script.ScriptType.P2PKH);
         serverKey = serverWallet.freshReceiveKey();
         chain.addWallet(serverWallet);
 
@@ -351,7 +351,7 @@ public class PaymentChannelStateTest extends TestWithWallet {
         wallet.addOrUpdateExtension(stateStorage);
 
         Utils.setMockClock(); // Use mock clock
-        final long EXPIRE_TIME = Utils.currentTimeMillis()/1000 + 60*60*24;
+        final long EXPIRE_TIME = Utils.currentTimeSeconds() + 60*60*24;
 
         serverState = makeServerState(mockBroadcaster, serverWallet, serverKey, EXPIRE_TIME);
         assertEquals(getInitialServerState(), serverState.getState());
@@ -702,7 +702,7 @@ public class PaymentChannelStateTest extends TestWithWallet {
         assertEquals(CENT.add(Transaction.REFERENCE_DEFAULT_MIN_TX_FEE), wallet.getBalance());
 
         Utils.setMockClock(); // Use mock clock
-        final long EXPIRE_TIME = Utils.currentTimeMillis()/1000 + 60*60*24;
+        final long EXPIRE_TIME = Utils.currentTimeSeconds() + 60*60*24;
 
         serverState = makeServerState(mockBroadcaster, serverWallet, serverKey, EXPIRE_TIME);
         assertEquals(getInitialServerState(), serverState.getState());
@@ -815,7 +815,7 @@ public class PaymentChannelStateTest extends TestWithWallet {
         Context.propagate(new Context(UNITTEST, 100, Coin.ZERO, true));
 
         Utils.setMockClock(); // Use mock clock
-        final long EXPIRE_TIME = Utils.currentTimeMillis()/1000 + 60*60*24;
+        final long EXPIRE_TIME = Utils.currentTimeSeconds() + 60*60*24;
 
         serverState = makeServerState(mockBroadcaster, serverWallet, serverKey, EXPIRE_TIME);
         assertEquals(getInitialServerState(), serverState.getState());

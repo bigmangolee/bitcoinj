@@ -25,7 +25,6 @@ import javax.annotation.Nullable;
 
 import org.bitcoinj.params.Networks;
 import org.bitcoinj.script.Script;
-import org.bitcoinj.script.Script.ScriptType;
 
 /**
  * <p>Implementation of native segwit addresses. They are composed of two parts:</p>
@@ -71,7 +70,7 @@ public class SegwitAddress extends Address {
     private static byte[] encode(int witnessVersion, byte[] witnessProgram) throws AddressFormatException {
         byte[] convertedProgram = convertBits(witnessProgram, 0, witnessProgram.length, 8, 5, true);
         byte[] bytes = new byte[1 + convertedProgram.length];
-        bytes[0] = (byte) (Script.encodeToOpN(witnessVersion) & 0xff);
+        bytes[0] = (byte) (witnessVersion & 0xff);
         System.arraycopy(convertedProgram, 0, bytes, 1, convertedProgram.length);
         return bytes;
     }
@@ -130,19 +129,19 @@ public class SegwitAddress extends Address {
 
     /**
      * Get the type of output script that will be used for sending to the address. This is either
-     * {@link ScriptType#P2WPKH} or {@link ScriptType#P2WSH}.
+     * {@link Script.ScriptType#P2WPKH} or {@link Script.ScriptType#P2WSH}.
      * 
      * @return type of output script
      */
     @Override
-    public ScriptType getOutputScriptType() {
+    public Script.ScriptType getOutputScriptType() {
         int version = getWitnessVersion();
         checkState(version == 0);
         int programLength = getWitnessProgram().length;
         if (programLength == WITNESS_PROGRAM_LENGTH_PKH)
-            return ScriptType.P2WPKH;
+            return Script.ScriptType.P2WPKH;
         if (programLength == WITNESS_PROGRAM_LENGTH_SH)
-            return ScriptType.P2WSH;
+            return Script.ScriptType.P2WSH;
         throw new IllegalStateException("Cannot happen.");
     }
 

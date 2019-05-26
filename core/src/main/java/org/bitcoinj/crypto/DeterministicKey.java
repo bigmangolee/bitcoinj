@@ -21,7 +21,6 @@ import org.bitcoinj.core.*;
 import org.bitcoinj.script.Script;
 
 import com.google.common.base.MoreObjects;
-import com.google.common.base.Objects;
 import com.google.common.collect.ImmutableList;
 import org.bouncycastle.crypto.params.KeyParameter;
 import org.bouncycastle.math.ec.ECPoint;
@@ -31,6 +30,7 @@ import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.Objects;
 
 import static org.bitcoinj.core.Utils.HEX;
 import static com.google.common.base.Preconditions.*;
@@ -377,7 +377,7 @@ public class DeterministicKey extends ECKey {
         BigInteger privKey = findOrDeriveEncryptedPrivateKey(keyCrypter, aesKey);
         DeterministicKey key = new DeterministicKey(childNumberPath, chainCode, privKey, parent);
         if (!Arrays.equals(key.getPubKey(), getPubKey()))
-            throw new KeyCrypterException("Provided AES key is wrong");
+            throw new KeyCrypterException.PublicPrivateMismatch("Provided AES key is wrong");
         if (parent == null)
             key.setCreationTimeSeconds(getCreationTimeSeconds());
         return key;
@@ -391,8 +391,13 @@ public class DeterministicKey extends ECKey {
     // For when a key is encrypted, either decrypt our encrypted private key bytes, or work up the tree asking parents
     // to decrypt and re-derive.
     private BigInteger findOrDeriveEncryptedPrivateKey(KeyCrypter keyCrypter, KeyParameter aesKey) {
-        if (encryptedPrivateKey != null)
-            return new BigInteger(1, keyCrypter.decrypt(encryptedPrivateKey, aesKey));
+        if (encryptedPrivateKey != null) {
+            byte[] decryptedKey = keyCrypter.decrypt(encryptedPrivateKey, aesKey);
+            if (decryptedKey.length != 32)
+                throw new KeyCrypterException.InvalidCipherText(
+                        "Decrypted key must be 32 bytes long, but is " + decryptedKey.length);
+            return new BigInteger(1, decryptedKey);
+        }
         // Otherwise we don't have it, but maybe we can figure it out from our parents. Walk up the tree looking for
         // the first key that has some encrypted private key data.
         DeterministicKey cursor = parent;
@@ -403,6 +408,9 @@ public class DeterministicKey extends ECKey {
         if (cursor == null)
             throw new KeyCrypterException("Neither this key nor its parents have an encrypted private key");
         byte[] parentalPrivateKeyBytes = keyCrypter.decrypt(cursor.encryptedPrivateKey, aesKey);
+        if (parentalPrivateKeyBytes.length != 32)
+            throw new KeyCrypterException.InvalidCipherText(
+                    "Decrypted key must be 32 bytes long, but is " + parentalPrivateKeyBytes.length);
         return derivePrivateKeyDownwards(cursor, parentalPrivateKeyBytes);
     }
 
@@ -436,7 +444,7 @@ public class DeterministicKey extends ECKey {
         // If it's not, it means we tried decrypting with an invalid password and earlier checks e.g. for padding didn't
         // catch it.
         if (!downCursor.pub.equals(pub))
-            throw new KeyCrypterException("Could not decrypt bytes");
+            throw new KeyCrypterException.PublicPrivateMismatch("Could not decrypt bytes");
         return checkNotNull(downCursor.priv);
     }
 
@@ -609,12 +617,12 @@ public class DeterministicKey extends ECKey {
         DeterministicKey other = (DeterministicKey) o;
         return super.equals(other)
                 && Arrays.equals(this.chainCode, other.chainCode)
-                && Objects.equal(this.childNumberPath, other.childNumberPath);
+                && Objects.equals(this.childNumberPath, other.childNumberPath);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hashCode(super.hashCode(), Arrays.hashCode(chainCode), childNumberPath);
+        return Objects.hash(super.hashCode(), Arrays.hashCode(chainCode), childNumberPath);
     }
 
     @Override

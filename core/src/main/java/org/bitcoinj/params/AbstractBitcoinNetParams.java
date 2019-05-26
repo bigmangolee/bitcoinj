@@ -28,6 +28,7 @@ import org.bitcoinj.core.NetworkParameters;
 import org.bitcoinj.core.Sha256Hash;
 import org.bitcoinj.core.StoredBlock;
 import org.bitcoinj.core.Transaction;
+import org.bitcoinj.core.TransactionOutput;
 import org.bitcoinj.core.Utils;
 import org.bitcoinj.utils.MonetaryFormat;
 import org.bitcoinj.core.VerificationException;
@@ -77,7 +78,7 @@ public abstract class AbstractBitcoinNetParams extends NetworkParameters {
 
     @Override
     public void checkDifficultyTransitions(final StoredBlock storedPrev, final Block nextBlock,
-    	final BlockStore blockStore) throws VerificationException, BlockStoreException {
+        final BlockStore blockStore) throws VerificationException, BlockStoreException {
         final Block prev = storedPrev.getHeader();
 
         // Is this supposed to be a difficulty transition point?
@@ -148,7 +149,9 @@ public abstract class AbstractBitcoinNetParams extends NetworkParameters {
         return MAX_MONEY;
     }
 
+    /** @deprecated use {@link TransactionOutput#getMinNonDustValue()} */
     @Override
+    @Deprecated
     public Coin getMinNonDustOutput() {
         return Transaction.MIN_NONDUST_OUTPUT;
     }

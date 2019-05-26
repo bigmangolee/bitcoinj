@@ -138,22 +138,17 @@ public final class HDKeyDerivation {
      * if the resulting derived key is invalid (eg. private key == 0).
      */
     public static DeterministicKey deriveChildKey(DeterministicKey parent, ChildNumber childNumber) throws HDDerivationException {
-        if (!parent.hasPrivKey()) {
-            RawKeyBytes rawKey = deriveChildKeyBytesFromPublic(parent, childNumber, PublicDeriveMode.NORMAL);
-            return new DeterministicKey(
-                    HDUtils.append(parent.getPath(), childNumber),
-                    rawKey.chainCode,
-                    new LazyECPoint(ECKey.CURVE.getCurve(), rawKey.keyBytes),
-                    null,
-                    parent);
-        } else {
-            RawKeyBytes rawKey = deriveChildKeyBytesFromPrivate(parent, childNumber);
-            return new DeterministicKey(
-                    HDUtils.append(parent.getPath(), childNumber),
-                    rawKey.chainCode,
-                    new BigInteger(1, rawKey.keyBytes),
-                    parent);
-        }
+        if (!parent.hasPrivKey())
+            return deriveChildKeyFromPublic(parent, childNumber, PublicDeriveMode.NORMAL);
+        else
+            return deriveChildKeyFromPrivate(parent, childNumber);
+    }
+
+    public static DeterministicKey deriveChildKeyFromPrivate(DeterministicKey parent, ChildNumber childNumber)
+            throws HDDerivationException {
+        RawKeyBytes rawKey = deriveChildKeyBytesFromPrivate(parent, childNumber);
+        return new DeterministicKey(HDUtils.append(parent.getPath(), childNumber), rawKey.chainCode,
+                new BigInteger(1, rawKey.keyBytes), parent);
     }
 
     public static RawKeyBytes deriveChildKeyBytesFromPrivate(DeterministicKey parent,
@@ -185,8 +180,15 @@ public final class HDKeyDerivation {
         WITH_INVERSION
     }
 
+    public static DeterministicKey deriveChildKeyFromPublic(DeterministicKey parent, ChildNumber childNumber,
+            PublicDeriveMode mode) throws HDDerivationException {
+        RawKeyBytes rawKey = deriveChildKeyBytesFromPublic(parent, childNumber, PublicDeriveMode.NORMAL);
+        return new DeterministicKey(HDUtils.append(parent.getPath(), childNumber), rawKey.chainCode,
+                new LazyECPoint(ECKey.CURVE.getCurve(), rawKey.keyBytes), null, parent);
+    }
+
     public static RawKeyBytes deriveChildKeyBytesFromPublic(DeterministicKey parent, ChildNumber childNumber, PublicDeriveMode mode) throws HDDerivationException {
-        checkArgument(!childNumber.isHardened(), "Can't use private derivation with public keys only.");
+        checkArgument(!childNumber.isHardened(), "Hardened derivation is unsupported (%s).", childNumber);
         byte[] parentPublicKey = parent.getPubKeyPoint().getEncoded(true);
         checkState(parentPublicKey.length == 33, "Parent pubkey must be 33 bytes, but is " + parentPublicKey.length);
         ByteBuffer data = ByteBuffer.allocate(37);

@@ -16,10 +16,10 @@
 
 package wallettemplate.controls;
 
-import org.bitcoinj.core.Address;
-import org.bitcoinj.uri.BitcoinURI;
-import de.jensd.fx.fontawesome.AwesomeDude;
-import de.jensd.fx.fontawesome.AwesomeIcon;
+import java.awt.Desktop;
+import java.io.IOException;
+import java.net.URI;
+
 import javafx.beans.binding.StringExpression;
 import javafx.beans.property.ObjectProperty;
 import javafx.beans.property.SimpleObjectProperty;
@@ -38,15 +38,16 @@ import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.AnchorPane;
 import javafx.scene.layout.Pane;
-import net.glxn.qrgen.QRCode;
-import net.glxn.qrgen.image.ImageType;
+
+import org.bitcoinj.core.Address;
+import org.bitcoinj.uri.BitcoinURI;
+
 import wallettemplate.Main;
 import wallettemplate.utils.GuiUtils;
+import wallettemplate.utils.QRCodeImages;
 
-import java.awt.*;
-import java.io.ByteArrayInputStream;
-import java.io.IOException;
-import java.net.URI;
+import de.jensd.fx.fontawesome.AwesomeDude;
+import de.jensd.fx.fontawesome.AwesomeIcon;
 
 import static javafx.beans.binding.Bindings.convert;
 
@@ -134,15 +135,7 @@ public class ClickableBitcoinAddress extends AnchorPane {
 
     @FXML
     protected void showQRCode(MouseEvent event) {
-        // Serialize to PNG and back into an image. Pretty lame but it's the shortest code to write and I'm feeling
-        // lazy tonight.
-        final byte[] imageBytes = QRCode
-                .from(uri())
-                .withSize(320, 240)
-                .to(ImageType.PNG)
-                .stream()
-                .toByteArray();
-        Image qrImage = new Image(new ByteArrayInputStream(imageBytes));
+        Image qrImage = QRCodeImages.imageFromString(uri(), 320, 240);
         ImageView view = new ImageView(qrImage);
         view.setEffect(new DropShadow());
         // Embed the image in a pane to ensure the drop-shadow interacts with the fade nicely, otherwise it looks weird.
@@ -153,4 +146,5 @@ public class ClickableBitcoinAddress extends AnchorPane {
         final Main.OverlayUI<ClickableBitcoinAddress> overlay = Main.instance.overlayUI(pane, this);
         view.setOnMouseClicked(event1 -> overlay.done());
     }
+
 }
